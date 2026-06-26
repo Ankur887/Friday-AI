@@ -1,0 +1,181 @@
+/* FILE: src/components/interview/sphere.module.css */
+/* PROJECT: Friday AI — Career OS */
+/* PURPOSE: CSS-only 3D sphere animations — single centered AI sphere */
+/* LAST UPDATED: 2026-06-25 */
+
+/* ── AI Sphere (200px — single centered bubble) ── */
+.sphereAI {
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #818CF8, #4F46E5, #1E1B4B);
+  box-shadow:
+    inset -24px -24px 48px rgba(0, 0, 0, 0.45),
+    inset 12px 12px 36px rgba(255, 255, 255, 0.18),
+    0 0 80px rgba(79, 70, 229, 0.55),
+    0 0 160px rgba(79, 70, 229, 0.22);
+  animation: spherePulseAI 3s ease-in-out infinite;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.sphereAI.speaking {
+  animation: sphereSpeakAI 0.5s ease-in-out infinite alternate;
+}
+
+.sphereAI.thinking {
+  animation: sphereThinkAI 1.4s ease-in-out infinite;
+}
+
+@keyframes spherePulseAI {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow:
+      inset -24px -24px 48px rgba(0, 0, 0, 0.45),
+      inset 12px 12px 36px rgba(255, 255, 255, 0.18),
+      0 0 80px rgba(79, 70, 229, 0.55),
+      0 0 160px rgba(79, 70, 229, 0.22);
+  }
+  50% {
+    transform: scale(1.035);
+    box-shadow:
+      inset -24px -24px 48px rgba(0, 0, 0, 0.45),
+      inset 12px 12px 36px rgba(255, 255, 255, 0.18),
+      0 0 110px rgba(79, 70, 229, 0.8),
+      0 0 200px rgba(79, 70, 229, 0.35);
+  }
+}
+
+@keyframes sphereSpeakAI {
+  from {
+    transform: scale(1.02);
+    box-shadow:
+      inset -24px -24px 48px rgba(0, 0, 0, 0.45),
+      inset 12px 12px 36px rgba(255, 255, 255, 0.22),
+      0 0 100px rgba(79, 70, 229, 0.95),
+      0 0 200px rgba(79, 70, 229, 0.55);
+  }
+  to {
+    transform: scale(1.07);
+    box-shadow:
+      inset -24px -24px 48px rgba(0, 0, 0, 0.45),
+      inset 12px 12px 36px rgba(255, 255, 255, 0.28),
+      0 0 150px rgba(124, 58, 237, 1),
+      0 0 250px rgba(124, 58, 237, 0.65);
+  }
+}
+
+@keyframes sphereThinkAI {
+  0%, 100% {
+    transform: scale(1.0);
+    box-shadow:
+      inset -24px -24px 48px rgba(0, 0, 0, 0.45),
+      inset 12px 12px 36px rgba(255, 255, 255, 0.15),
+      0 0 60px rgba(79, 70, 229, 0.4),
+      0 0 130px rgba(79, 70, 229, 0.18);
+    filter: brightness(0.85);
+  }
+  50% {
+    transform: scale(1.02);
+    box-shadow:
+      inset -24px -24px 48px rgba(0, 0, 0, 0.45),
+      inset 12px 12px 36px rgba(255, 255, 255, 0.22),
+      0 0 90px rgba(79, 70, 229, 0.7),
+      0 0 180px rgba(79, 70, 229, 0.32);
+    filter: brightness(0.95);
+  }
+}
+
+/* ── User sphere (kept for fallback, not currently rendered) ── */
+.sphereUser {
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #67E8F9, #0891B2, #0C4A6E);
+  box-shadow:
+    inset -20px -20px 40px rgba(0, 0, 0, 0.4),
+    inset 10px 10px 30px rgba(255, 255, 255, 0.15),
+    0 0 60px rgba(8, 145, 178, 0.5),
+    0 0 120px rgba(8, 145, 178, 0.2);
+  animation: spherePulseUser 3s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.sphereUser.speaking {
+  animation: sphereSpeakUser 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes spherePulseUser {
+  0%, 100% { transform: scale(1); }
+  50%       { transform: scale(1.04); }
+}
+
+@keyframes sphereSpeakUser {
+  from { transform: scale(1.02); }
+  to   { transform: scale(1.07); }
+}
+
+/* ── Active / dimmed states ── */
+.sphereDimmed {
+  filter: brightness(0.45) saturate(0.6);
+  transition: filter 0.5s ease;
+}
+.sphereActive {
+  filter: brightness(1) saturate(1);
+  transition: filter 0.5s ease;
+}
+
+/* ── SVG waveform ring wrapper ── */
+.waveRing {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 260px;
+  height: 260px;
+  pointer-events: none;
+}
+
+/* ── Listening waveform bars ── */
+.listeningBar {
+  display: inline-block;
+  border-radius: 99px;
+}
+
+/* ── Breathing mic ring (SPEAK button) ── */
+.breathingRing {
+  animation: breatheMic 1.8s ease-in-out infinite !important;
+}
+
+@keyframes breatheMic {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5), 0 0 0 6px rgba(239, 68, 68, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(239, 68, 68, 0.15), 0 0 0 20px rgba(239, 68, 68, 0.06);
+  }
+}
+
+/* ── Gain float popup ── */
+.gainFloat {
+  animation: gainFloatUp 1.2s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes gainFloatUp {
+  0%   { opacity: 1;   transform: translateX(-50%) translateY(0)   scale(1);   }
+  70%  { opacity: 0.9; transform: translateX(-50%) translateY(-44px) scale(1.12); }
+  100% { opacity: 0;   transform: translateX(-50%) translateY(-64px) scale(0.9); }
+}
+
+/* ── Live caption fade ── */
+@keyframes captionFadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+/* ── Custom scrollbar ── */
+.transcriptScroll::-webkit-scrollbar       { width: 4px; }
+.transcriptScroll::-webkit-scrollbar-track { background: transparent; }
+.transcriptScroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 99px; }
+.transcriptScroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }

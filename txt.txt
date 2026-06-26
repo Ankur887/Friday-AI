@@ -1,0 +1,952 @@
+# Friday AI — Complete Interview Experience Build Prompt
+
+## WHO YOU ARE
+
+You are a **senior full-stack engineer** on **Friday AI — Career OS**, a platform that conducts real AI-powered mock interviews. Your job right now is to build the complete, production-ready interview experience from end to end — Environment Verification screen through the live interview room — so that everything works correctly with no half-measures.
+
+Tech stack:
+- **Frontend:** React 18 + Vite + Tailwind CSS
+- **State:** Zustand
+- **Backend:** FastAPI + Groq LLM
+- **Audio/Video:** Web Speech API (STT + TTS), MediaPipe FaceMesh (CDN), Web Audio API
+- **Code editor:** Monaco Editor (`@monaco-editor/react`)
+- **Project root:** `d:\Friday_AI\`
+  - Frontend: `d:\Friday_AI\frontend\src\`
+  - Backend: `d:\Friday_AI\backend\`
+
+---
+
+## MANDATORY FIRST STEP — READ BEFORE WRITING A SINGLE LINE
+
+Before writing any code, read every one of these files in full:
+
+```
+src/components/interview/EnvironmentVerification.jsx
+src/components/interview/InterviewPanel.jsx
+src/components/interview/useInterviewLogic.js
+src/components/interview/CodePanel.jsx          ← may not exist yet
+src/hooks/useSpeechRecognition.js
+src/store/audioStore.js
+src/pages/Interview.jsx
+package.json
+vite.config.js
+backend/routers/interview.py
+```
+
+**Do not assume what is in a file. Read it. Then fix it.**
+
+---
+
+## CRITICAL RULES — NON-NEGOTIABLE
+
+1. **Every delivered file must be 100% complete and drop-in ready.** No "add this snippet here", no "replace function X with…", no truncated files with `// ... rest of file`. Every file you write must be the entire file.
+
+2. **Do not re-introduce any bug that was already fixed.** The 8 fixes listed in the next section are locked. If you rewrite a file that contains them, carry every fix forward.
+
+3. **Do not use `face-api.js` or any library that requires downloading model files.** Use MediaPipe FaceMesh via CDN only (dynamic script injection).
+
+4. **Do not create `AudioContext` on component mount.** It must be created inside a click handler (user gesture). The browser will silently block it otherwise.
+
+5. **Do not call `getUserMedia()` without handling `NotAllowedError`, `NotFoundError`, and `NotReadableError`.**
+
+6. **Install packages with npm if needed.** Do not tell the user to install; just include the correct imports and list required packages at the top of your response.
+
+---
+
+## BUGS ALREADY FIXED — CARRY THESE FORWARD
+
+These 8 fixes exist in the current codebase. If you rewrite any of the affected files, every fix must survive:
+
+| ID | File | What was fixed |
+|----|------|---------------|
+| FIX-A | `audioStore.js` | `loadSpeakerEnabled()` is now actually called to init the store (was hardcoded `true`, ignoring localStorage) |
+| FIX-B | `audioStore.js` | `speakText()` queues speech before any user gesture and flushes on first click/key. Browsers block autoplay speech. |
+| FIX-C | `audioStore.js` | `stopSpeaking()` clears the pending speech queue so a queued first-message never plays after the user starts talking |
+| FIX-D | `useInterviewLogic.js` | `speakerEnabled` is read via a ref (`speakerEnabledRef`) inside `speakIfEnabled()` so async TTS callbacks never capture a stale value |
+| FIX-E | `useInterviewLogic.js` | `submitUserAnswer` is wrapped in a stable ref so `useSpeechRecognition`'s `onFinalResult` callback always calls the latest version without re-registering the recognition instance |
+| FIX-F | `useInterviewLogic.js` | `startListening` has no `isSpeakingAI` gate — it always works, `stopSpeaking()` cuts AI audio first |
+| FIX-G | `InterviewPanel.jsx` | Added a dedicated `<SpeakerButton>` — `useAudioStore.toggleSpeaker()` existed but was never wired to any UI element |
+| FIX-H | `InterviewPanel.jsx` | SPEAK button is only disabled while AI is processing AND not yet speaking. While AI is speaking the button shows "INTERRUPT" and works |
+
+---
+
+## WHAT YOU ARE BUILDING
+
+A complete 3-screen interview flow:
+
+```
+[1. SetupScreen] → [2. EnvironmentVerification] → [3. InterviewRoom]
+```
+
+### Screen 1 — SetupScreen (already exists, do not touch unless broken)
+User picks company, role, round type, difficulty, language.
+
+### Screen 2 — EnvironmentVerification (needs full rewrite)
+Verifies the environment before the interview starts. Full spec below.
+
+### Screen 3 — InterviewRoom (needs code panel integration)
+The live interview. AI speaks questions, user answers by voice. **When the round type is a coding round OR the AI asks a question that contains code/algorithm keywords, a CODE PANEL slides up automatically so the user can write and submit code.**
+
+---
+
+## SCREEN 2 — ENVIRONMENT VERIFICATION (Full Spec)
+
+### Layout
+
+Two-column layout:
+
+**Left column — System Checks:**
+- Microphone test (button-triggered, real RMS sampling, animated level bar)
+- Speaker test (button-triggered, plays 3-tone chime, yes/no confirm)
+- Network latency (auto, ping backend `/health`)
+- Second screen detection (auto, `window.screen.width > window.innerWidth * 1.5 || window.screenLeft > 100`)
+- Fullscreen status (auto, `document.fullscreenElement !== null`)
+- Tab-switch protection status (auto, `visibilitychange` listener active)
+
+**Right column — Camera Preview:**
+- Live `<video>` element, mirrored with `transform: scaleX(-1)`
+- `<canvas>` overlay (mirrored too) with MediaPipe FaceMesh drawn on it
+- LIVE badge (green pulse dot)
+- Face status badges below the video:
+  - ✓/✗ Face detected
+  - ✓/✗ Eyes open (EAR value shown)
+  - ✓/✗ Looking at screen
+  - ✓/✗ Single person only
+  - Expression: neutral / speaking / attentive / surprised
+  - Attention: XX%
+- SVG score ring (0–100, color-coded)
+- Session summary card (company, role, round, difficulty)
+
+### Camera Implementation
+
+```
+startCamera() flow:
+1. Stop any existing stream (cameraStreamRef.current?.getTracks().forEach(t => t.stop()))
+2. getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }, audio: false })
+3. await new Promise(resolve => setTimeout(resolve, 100))  ← wait for DOM
+4. videoRef.current.srcObject = stream
+5. videoRef.current.muted = true
+6. videoRef.current.playsInline = true
+7. await new Promise((resolve, reject) => {
+     videoRef.current.onloadedmetadata = () => videoRef.current.play().then(resolve).catch(reject)
+     setTimeout(reject, 10000)
+   })
+8. setCameraStatus('active')
+```
+
+Handle errors: `NotAllowedError`, `NotFoundError`, `NotReadableError`.
+
+### Face Tracking — MediaPipe FaceMesh (CDN, no npm install)
+
+Load dynamically:
+```javascript
+const loadMediaPipe = () => new Promise((resolve, reject) => {
+  if (window.FaceMesh) { resolve(); return; }
+  const s1 = document.createElement('script');
+  s1.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js';
+  s1.crossOrigin = 'anonymous';
+  const s2 = document.createElement('script');
+  s2.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js';
+  s2.crossOrigin = 'anonymous';
+  s1.onload = () => document.head.appendChild(s2);
+  s2.onload = resolve;
+  s2.onerror = () => reject(new Error('MediaPipe load failed'));
+  s1.onerror = () => reject(new Error('Camera utils load failed'));
+  document.head.appendChild(s1);
+});
+```
+
+FaceMesh config: `maxNumFaces: 2`, `refineLandmarks: true`, `minDetectionConfidence: 0.5`
+
+Per-frame analysis:
+- **Eye Aspect Ratio (EAR):** landmarks `[33,160,158,133,153,144]` (left) and `[362,385,387,263,373,380]` (right). EAR > 0.20 = eyes open.
+- **Head pose:** yaw = `(nose.x - faceCenter.x) / faceWidth`. `|yaw| < 0.25` = looking at screen.
+- **Expression:** mouth open ratio (landmarks 13, 14 > 0.02 = speaking). Brow raise (landmark 70 vs 33 > 0.04 = attentive).
+- **Attention score:** `(lookingAtScreen ? 60 : 20) + (eyesOpen ? 30 : 0) + (singleFace ? 10 : 0)`
+
+Canvas drawing per frame:
+- Green bounding box around first face, red around extras
+- Blue eye outlines (left + right)
+- Key landmark dots at indices `[10, 152, 234, 454, 33, 263, 1, 61, 291, 199]`
+- "● You" label at first face, "● Extra Person" at others
+- Red dashed border + "No Face Detected" text when no face found
+
+Fallback if MediaPipe CDN fails: pixel diff motion detection on canvas. No crash, just a "Basic detection active" warning badge.
+
+### Microphone Test
+
+State machine: `idle → requesting → testing → pass | no_audio | fail`
+
+- **Triggered by button click** (never auto) — this is the user gesture that unlocks `AudioContext`
+- `getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false })`
+- Create `AudioContext` AFTER `getUserMedia` resolves
+- `AnalyserNode` → `fftSize: 512`, RMS over `Uint8Array`
+- Sample for 3 seconds, show live animated level bar (20 bars, height driven by `micLevel` 0–100)
+- Pass if more than 5 samples above threshold 5
+- `no_audio` state if connected but silent — show "Make sure mic is not muted" + Retry
+- Stop stream + close AudioContext after test
+
+### Speaker Test
+
+State machine: `idle → playing → confirm → pass | fail`
+
+- **Triggered by button click** — same user gesture rule
+- Create `AudioContext` directly inside click handler
+- Play 3-tone chime: C5 (523.25 Hz), E5 (659.25 Hz), G5 (783.99 Hz) with sine oscillators and smooth gain ramps
+- After chime: show "Did you hear the chime?" with Yes / No buttons
+- Yes → `pass`. No → `fail` with "Check volume and output device" tip
+
+### Environment Score (SVG Ring)
+
+```javascript
+const SCORE_WEIGHTS = {
+  microphone: 25, speaker: 20, face: 20, eyesOpen: 15,
+  network: 10, noSecondScreen: 5, fullscreen: 3, tabSwitch: 2
+};
+```
+
+SVG ring: radius 54, circumference = 2πr. `strokeDasharray` drives progress. Color: `≥90 → #22C55E`, `≥70 → #4ADE80`, `≥50 → #F59E0B`, `<50 → #EF4444`. Animate with CSS transition.
+
+### Begin Interview Button Gate
+
+Only enabled when ALL of these are true:
+```javascript
+checks.microphone === 'pass' &&
+checks.speaker === 'pass' &&
+checks.face === 'pass' &&
+faceData.eyesOpen === true &&
+faceData.detected === true &&
+environmentScore >= 60
+```
+
+Show pending checks below button: `⚠ Waiting for: Microphone · Face detection`
+
+### Cleanup on Unmount
+
+```javascript
+useEffect(() => () => {
+  cameraStreamRef.current?.getTracks().forEach(t => t.stop());
+  if (detectionFrameRef.current) cancelAnimationFrame(detectionFrameRef.current);
+  faceMeshRef.current?.close();
+  audioCtxRef.current?.close();
+}, []);
+```
+
+---
+
+## SCREEN 3 — INTERVIEW ROOM WITH CODE PANEL
+
+### Round Type → UI Mode
+
+```javascript
+const CODING_ROUNDS = new Set(['Coding Round', 'DSA Round', 'Machine Coding', 'System Design']);
+
+const isCodingRound = CODING_ROUNDS.has(sessionConfig?.round);
+```
+
+Additionally, detect coding questions dynamically — if the AI's latest message contains any of these keywords, auto-show the code panel even in non-coding rounds:
+
+```javascript
+const CODING_KEYWORDS = [
+  'write a function', 'implement', 'code', 'algorithm', 'data structure',
+  'time complexity', 'space complexity', 'write a program', 'define a class',
+  'return the', 'given an array', 'given a string', 'binary search',
+  'linked list', 'tree', 'graph', 'dynamic programming', 'recursion',
+  'sort', 'find the', 'compute', 'calculate'
+];
+
+const questionRequiresCode = (message) =>
+  CODING_KEYWORDS.some(kw => message.toLowerCase().includes(kw));
+```
+
+When either condition is true → render `<CodePanel>` in the layout. Otherwise → voice-only mode.
+
+### Layout — Coding Round
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  [Session badge]                    [🔊 AI VOICE] [Score]  │
+├──────────────────────┬──────────────────────────────────────┤
+│  AI SPHERE           │  CODE PANEL                          │
+│  (left 35%)          │  (right 65%)                         │
+│                      │  ┌─────────────────────────────────┐ │
+│  [SpeakerSphere]     │  │ [Python ▼] [Run] [Submit]       │ │
+│  [ThinkingDots]      │  │                                  │ │
+│  [ListeningIndicator]│  │  Monaco Editor                   │ │
+│                      │  │  (min 300px height)              │ │
+│  AI QUESTION:        │  │                                  │ │
+│  [last message,      │  └─────────────────────────────────┘ │
+│   scrollable]        │  ┌─────────────────────────────────┐ │
+│                      │  │  OUTPUT / RESULT                 │ │
+│  [🎤 SPEAK]          │  │  (collapsible, max 120px)        │ │
+│  [⏹ END]             │  └─────────────────────────────────┘ │
+└──────────────────────┴──────────────────────────────────────┘
+```
+
+### Layout — Voice-Only Round
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  [Session badge]                    [🔊 AI VOICE] [Score]  │
+│                                                             │
+│              [SpeakerSphere — large, centered]              │
+│              [ListeningIndicator]                           │
+│              [LiveCaption — last AI message]                │
+│                                                             │
+│      [🎤 SPEAK / ✋ INTERRUPT]   [🔊 ON/OFF]   [⏹ END]    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## CODE PANEL — FULL SPEC
+
+### Package to install
+
+```bash
+npm install @monaco-editor/react
+```
+
+### File: `src/components/interview/CodePanel.jsx`
+
+This is a new file. Build it from scratch.
+
+**Props:**
+```typescript
+{
+  onSubmit: (code: string, language: string) => void,  // sends as interview answer
+  isDisabled: boolean,                                  // true while AI is thinking
+  defaultLanguage?: string,                             // default 'python'
+  question?: string,                                    // current AI question (for context)
+}
+```
+
+**Supported languages:**
+```javascript
+const LANGUAGES = [
+  { id: 'python',     label: 'Python',      monacoId: 'python',     defaultCode: 'def solution():\n    pass\n' },
+  { id: 'javascript', label: 'JavaScript',  monacoId: 'javascript', defaultCode: 'function solution() {\n  \n}\n' },
+  { id: 'java',       label: 'Java',        monacoId: 'java',       defaultCode: 'class Solution {\n    public void solution() {\n        \n    }\n}\n' },
+  { id: 'cpp',        label: 'C++',         monacoId: 'cpp',        defaultCode: '#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    return 0;\n}\n' },
+  { id: 'typescript', label: 'TypeScript',  monacoId: 'typescript', defaultCode: 'function solution(): void {\n  \n}\n' },
+  { id: 'go',         label: 'Go',          monacoId: 'go',         defaultCode: 'package main\n\nfunc solution() {\n\n}\n' },
+];
+```
+
+**Monaco Editor config:**
+```javascript
+<Editor
+  height="320px"
+  language={selectedLang.monacoId}
+  value={code}
+  onChange={(val) => setCode(val || '')}
+  theme="vs-dark"
+  options={{
+    fontSize: 14,
+    fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+    minimap: { enabled: false },
+    lineNumbers: 'on',
+    scrollBeyondLastLine: false,
+    automaticLayout: true,
+    tabSize: 2,
+    wordWrap: 'on',
+    suggest: { showWords: false },
+  }}
+/>
+```
+
+**Submit button behavior:**
+When the user clicks Submit Code:
+1. Disable the button immediately (prevent double-submit)
+2. Format the submission: `` `[Code: ${language}]\n\n${code}` ``
+3. Call `onSubmit(formattedCode, language)`
+4. Do NOT clear the editor (user may want to refer back)
+5. Show a brief "Submitted ✓" flash on the button for 1.5 seconds
+
+**Run button (local, no backend):**
+For JavaScript only — eval in a sandboxed try/catch, show output in the output panel.
+For other languages — show "Run requires backend. Use Submit to send your code."
+
+**Output panel:**
+- Collapsible (default: open when there's output)
+- Shows: `stdout`, `stderr`, or the "run not available" message
+- Monospace font, dark background, max-height 120px with scroll
+- Clear button
+
+**Language change:**
+- Show a confirm dialog if the editor has non-default content: "Changing language will reset the editor. Continue?"
+- On confirm: reset code to the new language's `defaultCode`
+
+**Keyboard shortcuts:**
+- `Cmd/Ctrl + Enter` → Submit
+- `Cmd/Ctrl + Shift + Enter` → Run
+
+---
+
+## INTEGRATING CODE PANEL INTO `useInterviewLogic.js`
+
+The hook must expose whether the current question requires code:
+
+```javascript
+// Add to state:
+const [currentQuestionRequiresCode, setCurrentQuestionRequiresCode] = useState(false);
+
+// When AI message arrives (in startSession and submitUserAnswer):
+const requiresCode = isCodingRound || questionRequiresCode(aiMessage);
+setCurrentQuestionRequiresCode(requiresCode);
+
+// Add to return object:
+return {
+  ...existing,
+  currentQuestionRequiresCode,
+};
+```
+
+When `submitUserAnswer` is called with a code submission (starts with `[Code:`), add it to `conversationHistory` with a `type: 'code'` field so `ConversationBubble` can render it with syntax highlighting instead of plain text.
+
+---
+
+## BACKEND — `/interview/answer` CODE SUBMISSION
+
+The backend endpoint must handle code answers. When the answer starts with `[Code:`, extract the language and code, and include them in the Groq prompt differently:
+
+```python
+# In backend/routers/interview.py, inside the answer handler:
+
+is_code_answer = answer.strip().startswith('[Code:')
+
+if is_code_answer:
+    # Parse: "[Code: python]\n\nactual_code_here"
+    lines = answer.split('\n', 2)
+    lang_line = lines[0]  # "[Code: python]"
+    code_body = lines[2] if len(lines) > 2 else answer
+    language = lang_line.replace('[Code:', '').replace(']', '').strip()
+    
+    user_content = f"""The candidate submitted code in {language}:
+
+```{language}
+{code_body}
+```
+
+Evaluate this code: Is the logic correct? Is it efficient? What is the time/space complexity? 
+Ask a follow-up question about the code or move to the next question."""
+else:
+    user_content = answer
+```
+
+The AI then evaluates the code and responds naturally. No code execution on the backend is needed — the AI reviews it conversationally.
+
+---
+
+## AUDIO SYSTEM — DO NOT BREAK THESE
+
+The audio system (audioStore.js + useInterviewLogic.js) has 6 fixes that must stay intact. The critical ones to not accidentally undo:
+
+**In `audioStore.js`:**
+- `speakText()` queues calls before a user gesture and flushes on first click/key via `_gestureOccurred` flag and `_pendingSpeech` queue
+- `stopSpeaking()` also clears `_pendingSpeech`
+- Store initializes with `loadSpeakerEnabled()` (reads localStorage), not hardcoded `true`
+
+**In `useInterviewLogic.js`:**
+- `speakIfEnabled()` reads `speakerEnabledRef.current`, never closes over stale `speakerEnabled`
+- `stableOnFinalResult` ref wrapper prevents silent answer drops from stale closures
+- `startListening()` calls `stopSpeaking()` first, no `isSpeakingAI` gate
+
+**In `InterviewPanel.jsx`:**
+- `<SpeakerButton>` component with `useAudioStore` — it must exist and be rendered
+- SPEAK button `disabled` is `isThinking && !isSpeaking && !isListening` — not just `isThinking`
+
+---
+
+## `useSpeechRecognition.js` — DO NOT TOUCH
+
+This file is correct as-is. Do not rewrite it unless it has a specific bug to fix. Key behaviors that must stay:
+- `onFinalResult` stored in `onFinalRef` via `useEffect` (prevents stale closure)
+- `isListeningRef` prevents double-start
+- Auto-restart on `recognition.onend` unless `manualStopRef.current` is true
+- 3-second silence timer triggers `onFinalResult`
+- `no-speech` and `aborted` errors are non-fatal (ignored)
+
+---
+
+## FULL DELIVERABLES — EVERY FILE, COMPLETE
+
+Write every one of these files in full (100% complete, no truncation):
+
+### New files:
+1. `src/components/interview/CodePanel.jsx` — Monaco editor, language selector, submit/run, output panel
+2. `src/components/interview/ConversationBubble.jsx` — update to handle `type: 'code'` messages with syntax styling
+
+### Files to rewrite completely:
+3. `src/components/interview/EnvironmentVerification.jsx` — full rewrite per spec above
+4. `src/components/interview/InterviewPanel.jsx` — integrate `<CodePanel>`, carry FIX-G and FIX-H
+5. `src/components/interview/useInterviewLogic.js` — add `currentQuestionRequiresCode`, carry FIX-D/E/F
+6. `src/store/audioStore.js` — carry FIX-A/B/C (only rewrite if something needs changing here)
+7. `backend/routers/interview.py` — handle `[Code:]` prefixed answers in the LLM prompt
+
+### Verify (do not rewrite unless broken):
+8. `src/hooks/useSpeechRecognition.js`
+9. `src/pages/Interview.jsx`
+
+---
+
+## ADDITIONAL REQUIREMENTS
+
+### Typing indicator
+When the AI is thinking (`isThinking === true`), show animated thinking dots in the conversation feed AND in the code panel header ("AI is reviewing your code…" when the last submission was code).
+
+### Interview state persistence
+If the user refreshes mid-interview, show a "Resume Interview?" dialog. Store the last 10 conversation messages and session config in `sessionStorage` (not `localStorage` — clears on tab close).
+
+### Time tracking
+Display a timer in the session badge area: `MM:SS` counting up from 0. Stop on `endInterview()`. Show the elapsed time in the final report.
+
+### Round progress
+If the session has multiple rounds (e.g., behavioral → coding), show a progress indicator: `Round 2 of 3 — Coding`. This comes from `sessionConfig.rounds[]` and `sessionConfig.round_index`.
+
+### Accessibility
+- All buttons must have `aria-label`
+- Monaco editor container must have `role="region"` and `aria-label="Code editor"`
+- Camera preview must have `aria-label="Camera preview with face tracking"`
+- Focus the SPEAK button after AI finishes speaking (use a `useEffect` watching `isSpeaking`)
+
+---
+
+## OUTPUT FORMAT
+
+Respond with one file at a time in this format:
+
+```
+## FILE: src/components/interview/CodePanel.jsx
+[complete file contents]
+```
+
+After all files, include:
+
+```
+## PACKAGES TO INSTALL
+npm install @monaco-editor/react
+```
+
+And a brief **What changed** summary per file (3–5 bullets max).
+
+---
+
+## SANITY CHECKS BEFORE SUBMITTING YOUR RESPONSE
+
+Run through this checklist mentally:
+
+- [ ] Every file is 100% complete (no `// ... rest of file`)
+- [ ] `AudioContext` is never created on mount — only inside click handlers
+- [ ] `getUserMedia()` has error handling for `NotAllowedError`, `NotFoundError`, `NotReadableError`
+- [ ] MediaPipe loads from CDN dynamically — no `import` from npm, no model file downloads
+- [ ] Camera stream is stopped on component unmount
+- [ ] `requestAnimationFrame` loops are cancelled on unmount
+- [ ] `speakerEnabledRef` is used inside async callbacks, not `speakerEnabled` directly
+- [ ] `stableOnFinalResult` ref wrapper is present in `useInterviewLogic`
+- [ ] `startListening()` has no `isSpeakingAI` gate
+- [ ] `<SpeakerButton>` component exists and is rendered in `InterviewPanel`
+- [ ] SPEAK button `disabled` = `isThinking && !isSpeaking && !isListening`
+- [ ] `<CodePanel>` renders when `isCodingRound || currentQuestionRequiresCode`
+- [ ] `onSubmit` in CodePanel formats as `` `[Code: ${language}]\n\n${code}` ``
+- [ ] Backend `/interview/answer` handles `[Code:]` prefix
+- [ ] No imports reference files that don't exist
+- [ ] `package.json` dependencies include `@monaco-editor/react`
+
+
+Build a Resume.io Style Landing Page Before Entering the Resume Builder
+
+You are a Senior React + TypeScript + TailwindCSS UI Engineer and Product Designer.
+
+Goal
+
+Currently my application directly opens the dashboard/resume templates page after login.
+
+I want a professional marketing landing page similar to Resume.io.
+
+The landing page should be displayed first.
+
+Only when the user clicks:
+
+Create My Resume
+Upload My Resume
+
+should the application navigate to the actual resume builder/dashboard.
+
+The landing page must feel modern, premium, conversion-focused, and ATS-resume oriented similar to Resume.io's homepage structure.
+
+Routing Flow
+
+Current Flow:
+
+Login
+↓
+Dashboard
+
+New Flow:
+
+Login
+↓
+Landing Page
+↓
+(Create My Resume OR Upload My Resume)
+↓
+Dashboard / Resume Builder
+
+Routes:
+
+/
+Landing Page
+
+/resume/templates
+Template Selection
+
+/resume/builder
+Resume Builder
+
+/resume/upload
+Resume Upload Flow
+Hero Section
+
+Full-width premium hero section.
+
+Layout:
+
+Left Side:
+
+Large headline:
+
+This resume builder gets you hired faster
+
+Animate the final words.
+
+Examples:
+
+hired faster
+more interviews
+better jobs
+ATS approved
+
+Typing animation.
+
+Subtitle:
+
+Create professional ATS-friendly resumes in minutes.
+Built with AI assistance and recruiter-approved templates.
+
+Buttons:
+
+Primary:
+
+Create My Resume
+
+Navigate to:
+
+/resume/templates
+
+Secondary:
+
+Upload My Resume
+
+Navigate to:
+
+/resume/upload
+
+Trust indicators:
+
+✓ ATS Friendly
+✓ AI Powered
+✓ Recruiter Approved
+✓ Export PDF
+
+Right Side:
+
+Large animated resume mockup.
+
+Include:
+
+Resume preview
+ATS Score Card
+Skill badges
+Profile photo placeholder
+Floating AI suggestions card
+
+Use subtle floating animation.
+
+Statistics Section
+
+Immediately below hero.
+
+Large centered counter.
+
+Examples:
+
+162,240 resumes created today
+
+Animated count-up effect.
+
+4 cards underneath:
+
+Card 1:
+
+Create a draft in 10 minutes
+
+Card 2:
+
+Zero mistakes with AI assistance
+
+Card 3:
+
+ATS optimized templates
+
+Card 4:
+
+Increase interview chances
+
+Hover animations.
+
+Company Logos Section
+
+Display trusted company logos.
+
+Google
+Microsoft
+Amazon
+Meta
+Netflix
+Adobe
+OpenAI
+Stripe
+
+Infinite scrolling marquee.
+
+Text above:
+
+Candidates using our resumes have been hired at:
+Features Section
+
+3-column layout.
+
+Feature 1:
+
+AI Resume Builder
+
+Feature 2:
+
+ATS Resume Checker
+
+Feature 3:
+
+Smart Resume Templates
+
+Feature 4:
+
+Resume Analytics
+
+Feature 5:
+
+Job Match Scoring
+
+Feature 6:
+
+One Click Export
+
+Each card:
+
+Icon
+Title
+Description
+Hover glow effect
+Resume Templates Preview Section
+
+Show template cards.
+
+Categories:
+
+Modern
+Professional
+Startup
+Minimal
+Corporate
+ATS
+
+Each card:
+
+Mini resume preview
+Hover scale
+Preview button
+
+Bottom CTA:
+
+Browse All Templates
+
+Navigates to:
+
+/resume/templates
+How It Works Section
+
+Timeline with 4 steps.
+
+Step 1:
+
+Choose Template
+
+Step 2:
+
+Fill Details
+
+Step 3:
+
+AI Optimization
+
+Step 4:
+
+Download Resume
+
+Animated connecting line.
+
+ATS Score Showcase
+
+Show comparison.
+
+Before:
+
+ATS Score: 42%
+
+After:
+
+ATS Score: 91%
+
+Animated progress bars.
+
+Show recruiter approval badge.
+
+Testimonials Section
+
+3 testimonial cards.
+
+Include:
+
+Avatar
+Name
+Job title
+Review
+
+Example:
+
+Got 3 interviews within a week after using this builder.
+
+Auto-scroll carousel.
+
+Resume Upload Feature Showcase
+
+Section title:
+
+Already have a resume?
+
+Description:
+
+Upload your existing resume and let AI improve formatting,
+keywords, ATS compatibility, and overall score.
+
+Button:
+
+Upload Resume
+
+Navigate:
+
+/resume/upload
+
+Drag-and-drop upload illustration.
+
+Pricing Preview Section
+
+Cards:
+
+Free
+Pro
+Enterprise
+
+Modern pricing design.
+
+Highlight Pro plan.
+
+Final CTA Section
+
+Large centered block.
+
+Headline:
+
+Build the resume that gets you hired
+
+Buttons:
+
+Create Resume
+Upload Resume
+Footer
+
+Sections:
+
+Templates
+Resume Examples
+Cover Letters
+Resources
+Blog
+Help Center
+Privacy Policy
+Terms
+
+Social icons.
+
+Design Requirements
+
+Theme:
+
+Dark premium design
+
+Colors:
+
+Background: #050816
+Primary: #6366F1
+Secondary: #8B5CF6
+Accent: #06B6D4
+Text: White
+
+Use:
+
+TailwindCSS
+Framer Motion
+Lucide Icons
+React Router
+
+Animations:
+
+Fade in on scroll
+Count-up numbers
+Floating cards
+Hover glow
+Smooth transitions
+Typewriter hero headline
+Important
+
+DO NOT show:
+
+Dashboard
+Templates Page
+Resume Builder
+
+on initial load.
+
+The landing page must always be the first page users see.
+
+Only after clicking:
+
+Create My Resume
+
+or
+
+Upload My Resume
+
+should navigation occur.
+
+The final result should feel like a polished SaaS landing page comparable to Resume.io with conversion-focused sections, professional animations, and a premium user experience.
