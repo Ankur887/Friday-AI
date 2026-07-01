@@ -7,6 +7,14 @@
 //   FIX-G: SpeakerButton component wired to useAudioStore.toggleSpeaker()
 //   FIX-H: SPEAK disabled only when isThinking && !isSpeaking && !isListening
 //          When AI is speaking the button shows INTERRUPT and always works.
+//
+// REDESIGN (2026-07-01):
+//   Visual pass only — no changes to state shape, hook contracts, sibling
+//   props, or the CODE_ROUNDS / questionRequiresCode classifier logic below.
+//   Single accent (#FF5A36, "signal") replaces the prior indigo/cyan/amber/red
+//   four-way split. Floating glass badges consolidated into one instrument
+//   rail. Emoji icons replaced with inline SVG. See design notes at bottom
+//   of file for the token system if this needs to be extended later.
 
 import { useRef, useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -39,7 +47,97 @@ function questionRequiresCode(message = "") {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+//  DESIGN TOKENS — one accent, disciplined neutrals
+// ═════════════════════════════════════════════════════════════════════════════
+const T = {
+  void:      "#050507",
+  panel:     "#0B0B10",
+  panelUp:   "#111117",
+  line:      "rgba(255,255,255,0.08)",
+  lineFaint: "rgba(255,255,255,0.05)",
+  text:      "#EDEDF2",
+  textDim:   "#8A8A96",
+  textFaint: "#54545F",
+  signal:    "#FF5A36",   // the ONE accent — live/recording/danger/selected
+  signalDim: "rgba(255,90,54,0.14)",
+  signalMid: "rgba(255,90,54,0.32)",
+  good:      "#3DD68C",   // status-only, never decorative
+  warn:      "#E8B84B",
+  mono:      "'JetBrains Mono', ui-monospace, monospace",
+  sans:      "Outfit, Inter, sans-serif",
+};
+
+// ── Inline icon set (replaces emoji) ──────────────────────────────────────────
+const Icon = {
+  Mic: (p) => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="19" x2="12" y2="22"/>
+    </svg>
+  ),
+  Square: (p) => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" {...p}><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
+  ),
+  Hand: (p) => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M18 11V6a2 2 0 0 0-4 0v5"/><path d="M14 10V4a2 2 0 0 0-4 0v6"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/>
+      <path d="M6 14v-1a2 2 0 0 0-4 0v3a8 8 0 0 0 8 8h2a8 8 0 0 0 8-8v-3a2 2 0 0 0-4 0v1"/>
+    </svg>
+  ),
+  Stop: (p) => (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <circle cx="12" cy="12" r="10"/><line x1="8" y1="8" x2="16" y2="16"/><line x1="16" y1="8" x2="8" y2="16"/>
+    </svg>
+  ),
+  Speaker: (p) => (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/>
+    </svg>
+  ),
+  SpeakerOff: (p) => (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
+    </svg>
+  ),
+  Code: (p) => (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+    </svg>
+  ),
+  Chat: (p) => (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+    </svg>
+  ),
+  Camera: (p) => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>
+    </svg>
+  ),
+  X: (p) => (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" {...p}>
+      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+    </svg>
+  ),
+  CameraOff: (p) => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <line x1="1" y1="1" x2="23" y2="23"/><path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34"/><path d="M14.12 14.12A3 3 0 1 1 9.88 9.88"/>
+    </svg>
+  ),
+  Check: (p) => (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <polyline points="20 6 9 17 4 12"/>
+    </svg>
+  ),
+  Alert: (p) => (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+    </svg>
+  ),
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
 //  CameraPanel — live webcam + MediaPipe FaceMesh (CDN, no npm install)
+//  (detection/canvas logic unchanged — presentation shell only)
 // ═════════════════════════════════════════════════════════════════════════════
 function CameraPanel() {
   const videoRef     = useRef(null);
@@ -92,15 +190,11 @@ function CameraPanel() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     if (!results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
-      ctx.strokeStyle = "rgba(239,68,68,0.7)";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([8, 6]);
-      ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
+      ctx.strokeStyle = T.signal;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([7, 5]);
+      ctx.strokeRect(8, 8, canvas.width - 16, canvas.height - 16);
       ctx.setLineDash([]);
-      ctx.fillStyle = "rgba(239,68,68,0.85)";
-      ctx.font = "bold 13px Arial";
-      ctx.textAlign = "center";
-      ctx.fillText("No face detected", canvas.width / 2, canvas.height / 2);
       setFaceInfo({ detected: false, eyesOpen: false, lookingAt: false, expression: "none", attention: 0 });
       return;
     }
@@ -109,39 +203,27 @@ function CameraPanel() {
     const count = results.multiFaceLandmarks.length;
     const xs = lms.map((l) => l.x * canvas.width);
     const ys = lms.map((l) => l.y * canvas.height);
-    const minX = Math.min(...xs) - 12;
-    const minY = Math.min(...ys) - 12;
-    const maxX = Math.max(...xs) + 12;
-    const maxY = Math.max(...ys) + 12;
+    const minX = Math.min(...xs) - 10;
+    const minY = Math.min(...ys) - 10;
+    const maxX = Math.max(...xs) + 10;
+    const maxY = Math.max(...ys) + 10;
 
-    ctx.strokeStyle = count > 1 ? "rgba(239,68,68,0.8)" : "rgba(74,222,128,0.8)";
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = count > 1 ? T.signal : "rgba(237,237,242,0.55)";
+    ctx.lineWidth = 1;
     ctx.setLineDash([]);
     ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
-
-    const keyPoints = [10, 152, 234, 454, 33, 263, 1, 61, 291, 199, 4];
-    ctx.fillStyle = "rgba(129,140,248,0.9)";
-    keyPoints.forEach((idx) => {
+    // corner ticks — reads as "targeting reticle" rather than a generic box
+    const tick = 8;
+    ctx.strokeStyle = count > 1 ? T.signal : "rgba(237,237,242,0.85)";
+    ctx.lineWidth = 1.5;
+    [[minX, minY, 1, 1], [maxX, minY, -1, 1], [minX, maxY, 1, -1], [maxX, maxY, -1, -1]].forEach(([x, y, dx, dy]) => {
       ctx.beginPath();
-      ctx.arc(lms[idx].x * canvas.width, lms[idx].y * canvas.height, 2.5, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.moveTo(x, y + tick * dy); ctx.lineTo(x, y); ctx.lineTo(x + tick * dx, y);
+      ctx.stroke();
     });
 
     const leftEyeIdx  = [33, 160, 158, 133, 153, 144];
     const rightEyeIdx = [362, 385, 387, 263, 373, 380];
-    [leftEyeIdx, rightEyeIdx].forEach((indices) => {
-      ctx.beginPath();
-      ctx.strokeStyle = "rgba(96,165,250,0.85)";
-      ctx.lineWidth = 1.2;
-      indices.forEach((idx, i) => {
-        const x = lms[idx].x * canvas.width;
-        const y = lms[idx].y * canvas.height;
-        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-      });
-      ctx.closePath();
-      ctx.stroke();
-    });
-
     const avgEAR = (calcEAR(lms, leftEyeIdx) + calcEAR(lms, rightEyeIdx)) / 2;
     const eyesOpen = avgEAR > 0.18;
     const nose = lms[1], leftCheek = lms[234], rightCheek = lms[454];
@@ -153,18 +235,12 @@ function CameraPanel() {
     const attention = Math.round((lookingAt ? 55 : 15) + (eyesOpen ? 30 : 0) + (count === 1 ? 15 : 0));
 
     setFaceInfo({ detected: true, eyesOpen, lookingAt, expression, attention });
-
-    ctx.fillStyle = count > 1 ? "rgba(239,68,68,0.9)" : "rgba(74,222,128,0.9)";
-    ctx.font = "bold 11px Arial";
-    ctx.textAlign = "left";
-    ctx.fillText(count > 1 ? "⚠ Multiple faces" : "● You", minX, minY - 5);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
 
     const init = async () => {
-      // 1. Start camera
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: "user" },
@@ -193,7 +269,6 @@ function CameraPanel() {
         return;
       }
 
-      // 2. Load MediaPipe FaceMesh from CDN
       try {
         await loadMediaPipe();
         if (cancelled) return;
@@ -217,7 +292,6 @@ function CameraPanel() {
         };
         runDetection();
       } catch (mpErr) {
-        // MediaPipe failed — fallback to a simple "LIVE" canvas indicator
         console.warn("[CameraPanel] MediaPipe unavailable:", mpErr);
         const fallbackLoop = () => {
           if (cancelled || !videoRef.current || !canvasRef.current) return;
@@ -226,15 +300,6 @@ function CameraPanel() {
           canvas.width  = videoRef.current.videoWidth  || 320;
           canvas.height = videoRef.current.videoHeight || 240;
           ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.strokeStyle = "rgba(74,222,128,0.5)";
-          ctx.lineWidth = 1.5;
-          ctx.setLineDash([6, 4]);
-          ctx.strokeRect(14, 14, canvas.width - 28, canvas.height - 28);
-          ctx.setLineDash([]);
-          ctx.fillStyle = "rgba(74,222,128,0.8)";
-          ctx.font = "11px Arial";
-          ctx.textAlign = "center";
-          ctx.fillText("● Live  (basic detection)", canvas.width / 2, canvas.height - 10);
           setFaceInfo((prev) => ({ ...prev, detected: true, attention: 70 }));
           animFrameRef.current = requestAnimationFrame(fallbackLoop);
         };
@@ -251,135 +316,62 @@ function CameraPanel() {
     };
   }, [loadMediaPipe, onResults]);
 
-  const attColor =
-    faceInfo.attention >= 70 ? "#4ADE80"
-    : faceInfo.attention >= 40 ? "#FACC15"
-    : "#F87171";
+  const attColor = faceInfo.attention >= 70 ? T.good : faceInfo.attention >= 40 ? T.warn : T.signal;
 
   return (
-    <div style={{
-      position: "absolute", top: 80, right: 20, zIndex: 15,
-      width: collapsed ? 42 : 220,
-      transition: "width 0.3s ease",
-      display: "flex", flexDirection: "column", gap: 6,
-    }}>
-      {/* Collapse toggle */}
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{
+        position: "relative", width: collapsed ? 0 : 46, height: 34,
+        borderRadius: 6, overflow: "hidden",
+        border: `1px solid ${faceInfo.detected ? "rgba(255,255,255,0.14)" : T.signalMid}`,
+        background: "#000", flexShrink: 0,
+        transition: "width 0.25s ease, opacity 0.2s ease",
+        opacity: collapsed ? 0 : 1,
+      }}>
+        {cameraError ? (
+          <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: T.textFaint }}>
+            <Icon.CameraOff width={12} height={12} />
+          </div>
+        ) : (
+          <>
+            <video ref={videoRef} autoPlay muted playsInline
+              style={{ width: "100%", height: "100%", objectFit: "cover", transform: "scaleX(-1)", display: "block" }} />
+            <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", transform: "scaleX(-1)", pointerEvents: "none" }} />
+            <div style={{
+              position: "absolute", top: 2, left: 2, width: 5, height: 5, borderRadius: "50%",
+              background: cameraReady ? T.signal : T.warn,
+              boxShadow: cameraReady ? `0 0 5px ${T.signal}` : "none",
+            }} />
+          </>
+        )}
+      </div>
+
+      {!collapsed && !cameraError && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
+          <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 600, color: attColor, letterSpacing: "0.02em" }}>
+            {faceInfo.attention}% FOCUS
+          </span>
+          <span style={{ fontFamily: T.sans, fontSize: 9.5, color: T.textFaint }}>
+            {faceInfo.detected ? (faceInfo.lookingAt ? "on screen" : "looking away") : "no face"}
+          </span>
+        </div>
+      )}
+      {cameraError && (
+        <span style={{ fontFamily: T.sans, fontSize: 10.5, color: T.textFaint }}>{cameraError}</span>
+      )}
+
       <button
         onClick={() => setCollapsed((c) => !c)}
         aria-label={collapsed ? "Show camera" : "Hide camera"}
         style={{
-          alignSelf: "flex-end", width: 28, height: 28, borderRadius: "50%",
-          border: "1px solid rgba(255,255,255,0.12)",
-          background: "rgba(255,255,255,0.06)",
-          color: "rgba(255,255,255,0.5)", fontSize: 13, cursor: "pointer",
+          width: 20, height: 20, borderRadius: 5, flexShrink: 0,
+          border: `1px solid ${T.line}`, background: "transparent",
+          color: T.textFaint, cursor: "pointer",
           display: "flex", alignItems: "center", justifyContent: "center",
-          backdropFilter: "blur(8px)", flexShrink: 0,
         }}
       >
-        {collapsed ? "📷" : "✕"}
+        {collapsed ? <Icon.Camera width={11} height={11} /> : <Icon.X />}
       </button>
-
-      {!collapsed && (
-        <>
-          {/* Video container */}
-          <div
-            aria-label="Camera preview with face tracking"
-            style={{
-              position: "relative", width: 220, height: 165, borderRadius: 14,
-              overflow: "hidden",
-              border: `1.5px solid ${faceInfo.detected ? "rgba(74,222,128,0.4)" : "rgba(239,68,68,0.4)"}`,
-              background: "#050510",
-              boxShadow: "0 4px 24px rgba(0,0,0,0.5)",
-            }}
-          >
-            {cameraError ? (
-              <div style={{
-                width: "100%", height: "100%",
-                display: "flex", flexDirection: "column",
-                alignItems: "center", justifyContent: "center", gap: 6, padding: 12,
-              }}>
-                <span style={{ fontSize: 22 }}>📵</span>
-                <span style={{ fontSize: 11, color: "#F87171", textAlign: "center", fontFamily: "Outfit, sans-serif" }}>
-                  {cameraError}
-                </span>
-              </div>
-            ) : (
-              <>
-                <video ref={videoRef} autoPlay muted playsInline
-                  style={{ width: "100%", height: "100%", objectFit: "cover", transform: "scaleX(-1)", display: "block" }} />
-                <canvas ref={canvasRef} style={{
-                  position: "absolute", inset: 0,
-                  width: "100%", height: "100%",
-                  transform: "scaleX(-1)", pointerEvents: "none",
-                }} />
-                {/* LIVE badge */}
-                <div style={{
-                  position: "absolute", top: 6, left: 6,
-                  display: "flex", alignItems: "center", gap: 4,
-                  background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)",
-                  borderRadius: 99, padding: "2px 8px",
-                }}>
-                  <div style={{
-                    width: 6, height: 6, borderRadius: "50%",
-                    background: cameraReady ? "#4ADE80" : "#FACC15",
-                    animation: "ivBreathe 2s ease-in-out infinite",
-                  }} />
-                  <span style={{ fontSize: 9, fontWeight: 700, color: "#fff", letterSpacing: "0.1em" }}>
-                    {cameraReady ? "LIVE" : "STARTING"}
-                  </span>
-                </div>
-                {/* Attention score */}
-                <div style={{
-                  position: "absolute", bottom: 6, right: 6,
-                  background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
-                  borderRadius: 99, padding: "2px 8px",
-                }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: attColor }}>
-                    {faceInfo.attention}% focus
-                  </span>
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Face status mini-list */}
-          {!cameraError && (
-            <div style={{
-              background: "rgba(255,255,255,0.04)",
-              border: "1px solid rgba(255,255,255,0.07)",
-              borderRadius: 10, padding: "8px 10px",
-              display: "flex", flexDirection: "column", gap: 4,
-            }}>
-              {[
-                [faceInfo.detected,  "Face detected",     "No face detected"],
-                [faceInfo.eyesOpen,  "Eyes open",         "Eyes closed"],
-                [faceInfo.lookingAt, "Looking at screen", "Not looking at screen"],
-              ].map(([ok, yes, no], i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ fontSize: 10, color: ok ? "#4ADE80" : "#F87171" }}>{ok ? "✓" : "✗"}</span>
-                  <span style={{
-                    fontSize: 10,
-                    color: ok ? "rgba(255,255,255,0.65)" : "rgba(248,113,113,0.7)",
-                    fontFamily: "Outfit, sans-serif",
-                  }}>
-                    {ok ? yes : no}
-                  </span>
-                </div>
-              ))}
-              <div style={{
-                display: "flex", alignItems: "center", gap: 6,
-                marginTop: 2, paddingTop: 4,
-                borderTop: "1px solid rgba(255,255,255,0.06)",
-              }}>
-                <span style={{ fontSize: 10, color: "#818CF8" }}>◎</span>
-                <span style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", fontFamily: "Outfit, sans-serif" }}>
-                  {faceInfo.expression}
-                </span>
-              </div>
-            </div>
-          )}
-        </>
-      )}
     </div>
   );
 }
@@ -392,21 +384,20 @@ function ListeningIndicator({ visible }) {
       {visible && (
         <motion.div
           initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 6 }}
-          transition={{ duration: 0.25 }}
-          style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 7, marginTop: 4 }}
+          transition={{ duration: 0.22 }}
+          style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, marginTop: 6 }}
         >
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 22 }}>
-            {[0.7, 1.3, 1.0, 1.5, 0.8].map((amp, i) => (
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 18 }}>
+            {[0.6, 1.1, 0.85, 1.3, 0.7].map((amp, i) => (
               <div key={i} style={{
-                width: 4, borderRadius: 99, background: "#22D3EE",
-                height: `${Math.round(amp * 9)}px`,
-                boxShadow: "0 0 6px rgba(34,211,238,0.5)",
-                animation: `listeningBounce ${0.48 + i * 0.06}s ${i * 0.08}s ease-in-out infinite alternate`,
+                width: 3, borderRadius: 2, background: T.signal,
+                height: `${Math.round(amp * 8)}px`,
+                animation: `barPulse ${0.5 + i * 0.06}s ${i * 0.07}s ease-in-out infinite alternate`,
               }} />
             ))}
           </div>
-          <span style={{ fontFamily: "Outfit, sans-serif", fontSize: 11, color: "#94A3B8", letterSpacing: "0.1em" }}>
-            Listening…
+          <span style={{ fontFamily: T.mono, fontSize: 10, color: T.textDim, letterSpacing: "0.14em" }}>
+            LISTENING
           </span>
         </motion.div>
       )}
@@ -416,11 +407,11 @@ function ListeningIndicator({ visible }) {
 
 function ThinkingDots() {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
       {[0, 1, 2].map((i) => (
         <div key={i} style={{
-          width: 7, height: 7, borderRadius: "50%", background: "#818CF8",
-          animation: `ivSpinDot 1s ${i * 0.2}s ease-in-out infinite`,
+          width: 4, height: 4, borderRadius: "50%", background: T.textDim,
+          animation: `dotFade 1.1s ${i * 0.16}s ease-in-out infinite`,
         }} />
       ))}
     </div>
@@ -444,19 +435,18 @@ function LiveCaption({ text }) {
   return (
     <AnimatePresence>
       {visible && (
-        <motion.div
+        <motion.p
           key={display}
-          initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
-          transition={{ duration: 0.4, ease: "easeOut" }}
+          initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
+          transition={{ duration: 0.35, ease: "easeOut" }}
           style={{
-            textAlign: "center", maxWidth: "70%", margin: "0 auto",
-            fontSize: 15, fontStyle: "italic", color: "#94A3B8",
-            fontFamily: "Outfit, Inter, sans-serif",
-            lineHeight: 1.65, letterSpacing: "0.01em",
+            textAlign: "center", maxWidth: 560, margin: "0 auto",
+            fontSize: 16, color: T.text, fontFamily: T.sans, fontWeight: 400,
+            lineHeight: 1.6, letterSpacing: "0.005em",
           }}
         >
-          "{display}"
-        </motion.div>
+          {display}
+        </motion.p>
       )}
     </AnimatePresence>
   );
@@ -469,21 +459,18 @@ function ConversationPanel({ conversationHistory, isThinking, transcriptEndRef }
       style={{
         flex: 1, overflowY: "auto",
         display: "flex", flexDirection: "column",
-        padding: "8px 10px 4px",
-        background: "rgba(255,255,255,0.025)",
-        backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
-        borderRadius: 16, border: "1px solid rgba(255,255,255,0.06)",
-        maxHeight: "30vh",
+        padding: "10px 4px 4px",
+        maxHeight: "26vh",
       }}
     >
       {conversationHistory.length === 0 && !isThinking && (
         <div style={{
           display: "flex", flexDirection: "column",
           alignItems: "center", justifyContent: "center",
-          height: "100%", gap: 8, opacity: 0.4, padding: 20,
+          height: "100%", gap: 8, opacity: 0.5, padding: 20,
         }}>
-          <span style={{ fontSize: 22 }}>🎙️</span>
-          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", fontFamily: "Outfit, sans-serif" }}>
+          <Icon.Mic width={18} height={18} style={{ color: T.textFaint }} />
+          <span style={{ fontSize: 11.5, color: T.textFaint, fontFamily: T.sans }}>
             Starting your interview…
           </span>
         </div>
@@ -518,30 +505,17 @@ function SpeakerButton() {
       aria-label={speakerEnabled ? "Mute AI voice" : "Unmute AI voice"}
       title={speakerEnabled ? "Mute AI voice" : "Unmute AI voice"}
       style={{
-        display:        "flex",
-        alignItems:     "center",
-        gap:            8,
-        padding:        "12px 20px",
-        borderRadius:   99,
-        border: speakerEnabled
-          ? "1.5px solid rgba(74,222,128,0.4)"
-          : "1.5px solid rgba(255,255,255,0.12)",
-        background: speakerEnabled
-          ? "rgba(74,222,128,0.1)"
-          : "rgba(255,255,255,0.04)",
-        color:          speakerEnabled ? "#4ADE80" : "rgba(255,255,255,0.25)",
-        fontFamily:     "Outfit, sans-serif",
-        fontWeight:     700,
-        fontSize:       13,
-        letterSpacing:  "0.05em",
-        cursor:         "pointer",
-        transition:     "all 0.2s ease",
-        backdropFilter: "blur(12px)",
-        boxShadow:      speakerEnabled ? "0 0 14px rgba(74,222,128,0.15)" : "none",
+        display: "flex", alignItems: "center", gap: 8,
+        padding: "10px 16px", borderRadius: 10,
+        border: `1px solid ${speakerEnabled ? "rgba(255,255,255,0.16)" : T.line}`,
+        background: speakerEnabled ? T.panelUp : "transparent",
+        color: speakerEnabled ? T.text : T.textFaint,
+        fontFamily: T.sans, fontWeight: 600, fontSize: 12.5, letterSpacing: "0.02em",
+        cursor: "pointer", transition: "all 0.15s ease",
       }}
     >
-      <span style={{ fontSize: 16 }}>{speakerEnabled ? "🔊" : "🔇"}</span>
-      <span>{speakerEnabled ? "AI VOICE ON" : "AI VOICE OFF"}</span>
+      {speakerEnabled ? <Icon.Speaker /> : <Icon.SpeakerOff />}
+      <span>{speakerEnabled ? "Voice on" : "Voice off"}</span>
     </button>
   );
 }
@@ -556,11 +530,7 @@ function SessionTimer() {
   const mm = String(Math.floor(secs / 60)).padStart(2, "0");
   const ss = String(secs % 60).padStart(2, "0");
   return (
-    <span style={{
-      fontFamily: "'JetBrains Mono', monospace",
-      fontSize: 11, color: "rgba(255,255,255,0.3)",
-      letterSpacing: "0.08em",
-    }}>
+    <span style={{ fontFamily: T.mono, fontSize: 12, color: T.textDim, letterSpacing: "0.03em" }}>
       {mm}:{ss}
     </span>
   );
@@ -592,7 +562,6 @@ export default function InterviewPanel({ sessionConfig, jobRole, onEnd }) {
     submitUserAnswer,
   } = useInterviewLogic({ jobRole: role, sessionConfig, onEnd });
 
-  // Detect if current question needs code panel (even in non-coding rounds)
   const [showCodePanel, setShowCodePanel] = useState(isCodeRound);
 
   useEffect(() => {
@@ -602,7 +571,6 @@ export default function InterviewPanel({ sessionConfig, jobRole, onEnd }) {
     }
   }, [lastAIMessage, isCodeRound]);
 
-  // Start session once
   const startedRef = useRef(false);
   useEffect(() => {
     if (!startedRef.current && sessionConfig) {
@@ -611,13 +579,11 @@ export default function InterviewPanel({ sessionConfig, jobRole, onEnd }) {
     }
   }, [sessionConfig, startSession]);
 
-  // Auto-scroll conversation
   const transcriptEndRef = useRef(null);
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [conversationHistory, isThinking]);
 
-  // Focus SPEAK button after AI finishes speaking
   const speakBtnRef = useRef(null);
   useEffect(() => {
     if (!isSpeaking && !isThinking && speakBtnRef.current) {
@@ -625,7 +591,6 @@ export default function InterviewPanel({ sessionConfig, jobRole, onEnd }) {
     }
   }, [isSpeaking, isThinking]);
 
-  // Text fallback (when STT not supported)
   const [textAnswer, setTextAnswer] = useState("");
   const handleTextSubmit = useCallback(() => {
     if (!textAnswer.trim()) return;
@@ -633,102 +598,118 @@ export default function InterviewPanel({ sessionConfig, jobRole, onEnd }) {
     setTextAnswer("");
   }, [textAnswer, submitUserAnswer]);
 
-  // Code panel submit handler
   const handleCodeSubmit = useCallback((formattedCode, language) => {
     submitUserAnswer(formattedCode);
   }, [submitUserAnswer]);
 
   // FIX-H: SPEAK only disabled while AI processing AND not yet speaking/listening
   const speakBtnDisabled = isThinking && !isSpeaking && !isListening;
+  const isLive = isListening || isSpeaking;
 
   return (
     <div style={{
       display: "flex", flexDirection: "column",
       height: "100%", width: "100%",
-      background: "linear-gradient(160deg, #050510 0%, #0A0A18 50%, #060612 100%)",
+      background: T.void,
       position: "relative", overflow: "hidden",
-      fontFamily: "Outfit, Inter, sans-serif",
+      fontFamily: T.sans,
     }}>
-      {/* ── Global keyframes ── */}
       <style>{`
-        @keyframes ivSpinDot {
-          0%,100% { transform:translateY(0); opacity:0.4; }
-          50%      { transform:translateY(-6px); opacity:1; }
+        @keyframes dotFade { 0%,100% { opacity:0.25; } 50% { opacity:0.9; } }
+        @keyframes barPulse { from { transform:scaleY(0.5); opacity:0.6; } to { transform:scaleY(1.15); opacity:1; } }
+        @keyframes railScan {
+          0%   { transform: translateX(-40%); opacity: 0; }
+          15%  { opacity: 1; }
+          85%  { opacity: 1; }
+          100% { transform: translateX(140%); opacity: 0; }
         }
-        @keyframes listeningBounce {
-          from { transform:scaleY(0.55); opacity:0.7; }
-          to   { transform:scaleY(1.2);  opacity:1; }
+        @keyframes ringPulse {
+          0%,100% { box-shadow: 0 0 0 0 rgba(255,90,54,0.35); }
+          50%     { box-shadow: 0 0 0 5px rgba(255,90,54,0); }
         }
-        @keyframes ivBreathe {
-          0%,100% { box-shadow:0 0 0 0 rgba(239,68,68,0.5),0 0 0 6px rgba(239,68,68,0.2); }
-          50%     { box-shadow:0 0 0 10px rgba(239,68,68,0.15),0 0 0 22px rgba(239,68,68,0.06); }
+        #iv-speak-btn:focus-visible, #iv-end-btn:focus-visible, button:focus-visible {
+          outline: 2px solid ${T.signal}; outline-offset: 2px;
         }
-        @keyframes waveStrokeDash { to { stroke-dashoffset: -40; } }
+        @media (prefers-reduced-motion: reduce) {
+          #iv-scanline, .iv-breathe { animation: none !important; }
+        }
       `}</style>
 
-      {/* ── Camera overlay (top-right) ── */}
-      <CameraPanel />
+      {/* ═══ INSTRUMENT RAIL — single control surface, replaces floating badges ═══ */}
+      <div style={{
+        position: "relative", zIndex: 20, flexShrink: 0,
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "10px 18px",
+        background: T.panel,
+        borderBottom: `1px solid ${T.lineFaint}`,
+        overflow: "hidden",
+      }}>
+        {/* ambient scan-line while live, honestly evokes "being monitored" */}
+        {isLive && (
+          <div id="iv-scanline" style={{
+            position: "absolute", top: 0, bottom: 0, left: 0, width: "30%",
+            background: `linear-gradient(90deg, transparent, ${T.signalDim}, transparent)`,
+            animation: "railScan 3.2s linear infinite", pointerEvents: "none",
+          }} />
+        )}
 
-      {/* ── Integrity Ring (top-right area, left of camera) ── */}
-      <div style={{ position: "absolute", top: 20, right: 254, zIndex: 20 }}>
-        <IntegrityRing score={integrityScore} gainAnimation={lastGain} />
-      </div>
-
-      {/* ── Session badge (top-left) ── */}
-      {sessionConfig?.company && (
-        <div style={{
-          position: "absolute", top: 22, left: 24, zIndex: 20,
-          display: "flex", flexDirection: "column", gap: 4,
-        }}>
+        {/* Left: session identity */}
+        <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
           <div style={{
-            display: "inline-flex", alignItems: "center", gap: 8,
-            background: "rgba(91,111,245,0.12)",
-            border: "1px solid rgba(91,111,245,0.25)",
-            borderRadius: 99, padding: "4px 12px",
-          }}>
-            <div style={{
-              width: 6, height: 6, borderRadius: "50%", background: "#4ADE80",
-              boxShadow: "0 0 8px rgba(74,222,128,0.6)",
-              animation: "ivBreathe 2s ease-in-out infinite",
-            }} />
-            <span style={{ fontSize: 11, fontWeight: 700, color: "#C7D2FE", letterSpacing: "0.08em" }}>
-              {sessionConfig.company} · {role}
-            </span>
-            <SessionTimer />
-          </div>
-          {sessionConfig.round && (
+            width: 7, height: 7, borderRadius: "50%",
+            background: isLive ? T.signal : T.textFaint,
+            flexShrink: 0,
+            boxShadow: isLive ? `0 0 8px ${T.signal}` : "none",
+            animation: isLive ? "ringPulse 1.8s ease-in-out infinite" : "none",
+          }} className="iv-breathe" />
+          <div style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
             <span style={{
-              fontSize: 9, color: "rgba(255,255,255,0.25)",
-              letterSpacing: "0.14em", paddingLeft: 14, textTransform: "uppercase",
+              fontSize: 13.5, fontWeight: 700, color: T.text,
+              letterSpacing: "-0.01em", whiteSpace: "nowrap",
+              overflow: "hidden", textOverflow: "ellipsis",
             }}>
-              {sessionConfig.round} · {sessionConfig.difficulty || ""}
+              {sessionConfig?.company ? `${sessionConfig.company} · ${role}` : role}
             </span>
-          )}
+            {sessionConfig?.round && (
+              <span style={{
+                fontSize: 10, color: T.textFaint, letterSpacing: "0.08em",
+                textTransform: "uppercase", whiteSpace: "nowrap",
+              }}>
+                {sessionConfig.round}{sessionConfig.difficulty ? ` · ${sessionConfig.difficulty}` : ""}
+              </span>
+            )}
+          </div>
+          <div style={{ width: 1, height: 22, background: T.line, flexShrink: 0 }} />
+          <SessionTimer />
         </div>
-      )}
+
+        {/* Right: integrity + camera */}
+        <div style={{ display: "flex", alignItems: "center", gap: 16, flexShrink: 0 }}>
+          <IntegrityRing score={integrityScore} gainAnimation={lastGain} />
+          <div style={{ width: 1, height: 22, background: T.line }} />
+          <CameraPanel />
+        </div>
+      </div>
 
       {/* ── Main layout ── */}
       {showCodePanel ? (
-        /* CODING LAYOUT: left sphere (35%) + right code panel (65%) */
         <div style={{
           flex: 1, display: "flex", flexDirection: "row",
-          paddingTop: 72, paddingBottom: 80,
-          gap: 0, minHeight: 0,
+          paddingBottom: 76, gap: 0, minHeight: 0,
         }}>
-          {/* Left: sphere + conversation */}
           <div style={{
-            width: "35%", flexShrink: 0,
+            width: "34%", flexShrink: 0,
             display: "flex", flexDirection: "column",
             alignItems: "center", justifyContent: "flex-start",
-            paddingTop: 20, paddingLeft: 20, paddingRight: 10,
+            padding: "22px 18px 10px 22px",
             gap: 14, minHeight: 0,
+            borderRight: `1px solid ${T.lineFaint}`,
           }}>
-            {/* Thinking label */}
             {isThinking && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, height: 24 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, height: 20 }}>
                 <ThinkingDots />
-                <span style={{ fontSize: 11, color: "#818CF8", fontWeight: 600, letterSpacing: "0.1em" }}>
-                  AI is thinking…
+                <span style={{ fontSize: 10.5, color: T.textDim, fontWeight: 600, letterSpacing: "0.1em" }}>
+                  THINKING
                 </span>
               </div>
             )}
@@ -738,20 +719,19 @@ export default function InterviewPanel({ sessionConfig, jobRole, onEnd }) {
 
             {liveTranscript && isListening && (
               <div style={{
-                fontSize: 11, color: "rgba(255,255,255,0.35)",
+                fontSize: 11, color: T.textFaint,
                 maxWidth: "90%", overflow: "hidden",
                 textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "center",
               }}>
-                "{liveTranscript}"
+                {liveTranscript}
               </div>
             )}
             {silenceCountdown != null && silenceCountdown > 0 && isListening && (
-              <div style={{ fontSize: 10, color: "#22D3EE", fontWeight: 700, letterSpacing: "0.1em" }}>
-                Auto-sending in {silenceCountdown}s…
+              <div style={{ fontFamily: T.mono, fontSize: 10, color: T.signal, fontWeight: 600, letterSpacing: "0.06em" }}>
+                Sending in {silenceCountdown}s
               </div>
             )}
 
-            {/* Conversation scroll (compact) */}
             {conversationHistory.length > 0 && (
               <div style={{ width: "100%", flex: 1, minHeight: 0 }}>
                 <ConversationPanel
@@ -764,19 +744,20 @@ export default function InterviewPanel({ sessionConfig, jobRole, onEnd }) {
 
             {micError && (
               <div style={{
-                background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)",
-                borderRadius: 10, padding: "6px 12px",
-                fontSize: 11, color: "#FCA5A5", textAlign: "center",
+                display: "flex", alignItems: "center", gap: 6,
+                border: `1px solid ${T.signalMid}`,
+                borderRadius: 8, padding: "6px 10px",
+                fontSize: 11, color: T.text,
               }}>
-                ⚠️ {micError}
+                <Icon.Alert style={{ color: T.signal, flexShrink: 0 }} />
+                {micError}
               </div>
             )}
           </div>
 
-          {/* Right: Code panel */}
           <div style={{
             flex: 1, display: "flex", flexDirection: "column",
-            paddingTop: 12, paddingRight: 20, paddingBottom: 4, minHeight: 0,
+            padding: "18px 22px 8px", minHeight: 0,
           }}>
             <CodePanel
               onSubmit={handleCodeSubmit}
@@ -788,32 +769,27 @@ export default function InterviewPanel({ sessionConfig, jobRole, onEnd }) {
           </div>
         </div>
       ) : (
-        /* VOICE LAYOUT: centered sphere + live caption */
         <>
-          {/* Sphere area */}
           <div style={{
-            flex: "0 0 70%",
+            flex: "0 0 68%",
             display: "flex", flexDirection: "column",
             alignItems: "center", justifyContent: "center",
             position: "relative",
           }}>
-            {/* Ambient glow */}
             <div style={{
               position: "absolute", top: "50%", left: "50%",
               transform: "translate(-50%, -50%)",
-              width: 400, height: 300,
-              background: "radial-gradient(ellipse, rgba(79,70,229,0.14) 0%, transparent 70%)",
-              pointerEvents: "none",
+              width: 420, height: 320,
+              background: `radial-gradient(ellipse, ${T.signalDim} 0%, transparent 72%)`,
+              pointerEvents: "none", opacity: isLive ? 1 : 0.4,
+              transition: "opacity 0.4s ease",
             }} />
 
             {isThinking && (
-              <div style={{
-                position: "absolute", top: 28,
-                display: "flex", alignItems: "center", gap: 8,
-              }}>
+              <div style={{ position: "absolute", top: 26, display: "flex", alignItems: "center", gap: 8 }}>
                 <ThinkingDots />
-                <span style={{ fontSize: 11, color: "#818CF8", fontWeight: 600, letterSpacing: "0.1em" }}>
-                  AI is thinking…
+                <span style={{ fontSize: 10.5, color: T.textDim, fontWeight: 600, letterSpacing: "0.1em" }}>
+                  THINKING
                 </span>
               </div>
             )}
@@ -822,50 +798,51 @@ export default function InterviewPanel({ sessionConfig, jobRole, onEnd }) {
             <ListeningIndicator visible={isListening && !isSpeaking} />
 
             {silenceCountdown != null && silenceCountdown > 0 && isListening && (
-              <div style={{ marginTop: 8, fontSize: 10, color: "#22D3EE", fontWeight: 700, letterSpacing: "0.1em" }}>
-                Auto-sending in {silenceCountdown}s…
+              <div style={{ marginTop: 10, fontFamily: T.mono, fontSize: 10, color: T.signal, fontWeight: 600, letterSpacing: "0.06em" }}>
+                Sending in {silenceCountdown}s
               </div>
             )}
           </div>
 
-          {/* Live caption area */}
           <div style={{
-            flex: "0 0 20%",
+            flex: "0 0 22%",
             display: "flex", flexDirection: "column",
             alignItems: "center", justifyContent: "center",
-            padding: "0 24px", gap: 8,
+            padding: "0 28px", gap: 10,
           }}>
             <LiveCaption text={lastAIMessage} />
 
-            {/* Text input fallback when STT not supported */}
             {!isSupported && (
-              <div style={{ display: "flex", gap: 8, width: "100%", maxWidth: 500 }}>
+              <div style={{ display: "flex", gap: 8, width: "100%", maxWidth: 480 }}>
                 <input
                   value={textAnswer}
                   onChange={(e) => setTextAnswer(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleTextSubmit(); }
                   }}
-                  placeholder="Type your answer (mic not available)…"
+                  placeholder="Type your answer — mic unavailable"
                   disabled={isThinking}
                   style={{
-                    flex: 1, background: "rgba(255,255,255,0.06)",
-                    border: "1px solid rgba(255,255,255,0.1)",
-                    borderRadius: 10, padding: "9px 12px",
-                    fontSize: 13, color: "#D1D5DB",
-                    fontFamily: "Outfit, sans-serif", outline: "none",
+                    flex: 1, background: T.panel,
+                    border: `1px solid ${T.line}`,
+                    borderRadius: 8, padding: "10px 13px",
+                    fontSize: 13, color: T.text,
+                    fontFamily: T.sans, outline: "none",
                     opacity: isThinking ? 0.5 : 1,
                   }}
+                  onFocus={(e) => e.target.style.borderColor = T.signalMid}
+                  onBlur={(e) => e.target.style.borderColor = T.line}
                 />
                 <button
                   onClick={handleTextSubmit}
                   disabled={!textAnswer.trim() || isThinking}
                   style={{
-                    padding: "9px 16px", borderRadius: 10, border: "none",
-                    background: textAnswer.trim() && !isThinking ? "rgba(79,70,229,0.8)" : "rgba(255,255,255,0.06)",
-                    color: textAnswer.trim() && !isThinking ? "#fff" : "#6B7280",
-                    fontSize: 12, fontWeight: 700, cursor: textAnswer.trim() && !isThinking ? "pointer" : "not-allowed",
-                    fontFamily: "Outfit, sans-serif",
+                    padding: "10px 18px", borderRadius: 8, border: "none",
+                    background: textAnswer.trim() && !isThinking ? T.signal : T.panel,
+                    color: textAnswer.trim() && !isThinking ? "#fff" : T.textFaint,
+                    fontSize: 12.5, fontWeight: 700,
+                    cursor: textAnswer.trim() && !isThinking ? "pointer" : "not-allowed",
+                    fontFamily: T.sans,
                   }}
                 >
                   Send
@@ -880,39 +857,31 @@ export default function InterviewPanel({ sessionConfig, jobRole, onEnd }) {
       <div style={{
         position: "absolute", bottom: 0, left: 0, right: 0,
         display: "flex", alignItems: "center", justifyContent: "center",
-        gap: 12, padding: "12px 24px 16px",
-        background: "linear-gradient(to top, rgba(5,5,16,0.95) 0%, rgba(5,5,16,0.7) 70%, transparent 100%)",
+        gap: 10, padding: "16px 24px 20px",
+        background: `linear-gradient(to top, ${T.void} 0%, rgba(5,5,7,0.85) 60%, transparent 100%)`,
         zIndex: 20,
       }}>
-        {/* FIX-G: Speaker toggle */}
         <SpeakerButton />
 
-        {/* Toggle code panel button (always available) */}
         {!isCodeRound && (
           <button
             onClick={() => setShowCodePanel((v) => !v)}
             aria-label={showCodePanel ? "Hide code panel" : "Show code panel"}
             style={{
               display: "flex", alignItems: "center", gap: 8,
-              padding: "12px 18px", borderRadius: 99,
-              border: showCodePanel
-                ? "1.5px solid rgba(251,191,36,0.4)"
-                : "1.5px solid rgba(255,255,255,0.12)",
-              background: showCodePanel
-                ? "rgba(251,191,36,0.1)"
-                : "rgba(255,255,255,0.04)",
-              color: showCodePanel ? "#FCD34D" : "rgba(255,255,255,0.4)",
-              fontFamily: "Outfit, sans-serif", fontWeight: 700,
-              fontSize: 13, letterSpacing: "0.05em", cursor: "pointer",
-              transition: "all 0.2s ease",
+              padding: "10px 16px", borderRadius: 10,
+              border: `1px solid ${showCodePanel ? "rgba(255,255,255,0.16)" : T.line}`,
+              background: showCodePanel ? T.panelUp : "transparent",
+              color: showCodePanel ? T.text : T.textFaint,
+              fontFamily: T.sans, fontWeight: 600, fontSize: 12.5, letterSpacing: "0.02em",
+              cursor: "pointer", transition: "all 0.15s ease",
             }}
           >
-            <span>{ showCodePanel ? "💬" : "💻" }</span>
-            <span>{ showCodePanel ? "VOICE" : "CODE" }</span>
+            {showCodePanel ? <Icon.Chat /> : <Icon.Code />}
+            <span>{showCodePanel ? "Voice" : "Code"}</span>
           </button>
         )}
 
-        {/* SPEAK / mic button — FIX-H */}
         {isSupported && (
           <button
             ref={speakBtnRef}
@@ -921,86 +890,97 @@ export default function InterviewPanel({ sessionConfig, jobRole, onEnd }) {
             onClick={isListening ? stopListening : startListening}
             disabled={speakBtnDisabled}
             style={{
-              display:        "flex",
-              alignItems:     "center",
-              gap:            10,
-              padding:        "12px 28px",
-              borderRadius:   99,
-              border: isListening
-                ? "1.5px solid rgba(239,68,68,0.6)"
-                : isSpeaking
-                ? "1.5px solid rgba(34,211,238,0.5)"
-                : speakBtnDisabled
-                ? "1.5px solid rgba(255,255,255,0.08)"
-                : "1.5px solid rgba(255,255,255,0.15)",
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "13px 30px", borderRadius: 12,
+              border: "none",
               background: isListening
-                ? "rgba(239,68,68,0.18)"
+                ? T.signal
                 : isSpeaking
-                ? "rgba(34,211,238,0.1)"
+                ? T.panelUp
                 : speakBtnDisabled
-                ? "rgba(255,255,255,0.03)"
-                : "rgba(79,70,229,0.18)",
+                ? T.panel
+                : T.signal,
               color: isListening
-                ? "#FCA5A5"
+                ? "#fff"
                 : isSpeaking
-                ? "#67E8F9"
+                ? T.text
                 : speakBtnDisabled
-                ? "#374151"
-                : "#C7D2FE",
-              fontFamily:     "Outfit, sans-serif",
-              fontWeight:     700,
-              fontSize:       14,
-              letterSpacing:  "0.05em",
-              cursor:         speakBtnDisabled ? "not-allowed" : "pointer",
-              transition:     "all 0.2s ease",
-              backdropFilter: "blur(12px)",
+                ? T.textFaint
+                : "#fff",
+              fontFamily: T.sans, fontWeight: 700, fontSize: 14, letterSpacing: "0.01em",
+              cursor: speakBtnDisabled ? "not-allowed" : "pointer",
+              transition: "all 0.18s ease",
               boxShadow: isListening
-                ? "0 0 0 0 rgba(239,68,68,0.5), 0 0 0 6px rgba(239,68,68,0.2)"
-                : isSpeaking
-                ? "0 0 16px rgba(34,211,238,0.2)"
-                : !speakBtnDisabled
-                ? "0 0 20px rgba(79,70,229,0.25)"
+                ? `0 0 0 0 rgba(255,90,54,0.5)`
+                : !speakBtnDisabled && !isSpeaking
+                ? `0 4px 20px rgba(255,90,54,0.35)`
                 : "none",
-              animation: isListening ? "ivBreathe 1.8s ease-in-out infinite" : "none",
+              animation: isListening ? "ringPulse 1.5s ease-in-out infinite" : "none",
             }}
           >
-            <span style={{ fontSize: 18 }}>
-              {isListening ? "🔴" : isSpeaking ? "✋" : "🎤"}
-            </span>
+            {isListening ? <Icon.Square /> : isSpeaking ? <Icon.Hand /> : <Icon.Mic />}
             <span>
-              {isListening ? "LISTENING…" : isSpeaking ? "INTERRUPT" : "SPEAK"}
+              {isListening ? "Listening" : isSpeaking ? "Interrupt" : "Speak"}
             </span>
           </button>
         )}
 
-        {/* END INTERVIEW */}
         <button
           id="iv-end-btn"
           aria-label="End interview"
           onClick={endInterview}
           style={{
-            display: "flex", alignItems: "center", gap: 10,
-            padding: "12px 28px", borderRadius: 99,
-            border: "1.5px solid rgba(239,68,68,0.3)",
-            background: "rgba(239,68,68,0.08)",
-            color: "#FCA5A5", fontFamily: "Outfit, sans-serif",
-            fontWeight: 700, fontSize: 14, letterSpacing: "0.05em",
-            cursor: "pointer", transition: "all 0.2s ease",
-            backdropFilter: "blur(12px)",
+            display: "flex", alignItems: "center", gap: 9,
+            padding: "10px 20px", borderRadius: 10,
+            border: `1px solid ${T.line}`,
+            background: "transparent",
+            color: T.textDim, fontFamily: T.sans,
+            fontWeight: 600, fontSize: 12.5, letterSpacing: "0.02em",
+            cursor: "pointer", transition: "all 0.15s ease",
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background  = "rgba(239,68,68,0.18)";
-            e.currentTarget.style.borderColor = "rgba(239,68,68,0.55)";
+            e.currentTarget.style.borderColor = T.signalMid;
+            e.currentTarget.style.color = T.signal;
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background  = "rgba(239,68,68,0.08)";
-            e.currentTarget.style.borderColor = "rgba(239,68,68,0.3)";
+            e.currentTarget.style.borderColor = T.line;
+            e.currentTarget.style.color = T.textDim;
           }}
         >
-          <span style={{ fontSize: 18 }}>⏹</span>
-          <span>END INTERVIEW</span>
+          <Icon.Stop />
+          <span>End</span>
         </button>
       </div>
     </div>
   );
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DESIGN NOTES (for future passes on sibling components — not code, just
+   reference so the next edit stays consistent with this pass):
+
+   Signature element: the instrument rail's scan-line sweep — the one
+   deliberate risk taken here. It reframes "being watched during a proctored
+   interview" honestly instead of hiding it behind glassmorphism, and it's
+   the single animated flourish; everything else (dots, bars) is quieter and
+   shares the same easing/duration family instead of each having its own
+   timing.
+
+   One accent discipline: #FF5A36 ("signal") is the ONLY color that means
+   something — live mic, camera-live dot, danger-hover on End, silence
+   countdown. It does not appear as a decorative border or background tint
+   anywhere else. If a new control is added, ask "is this live/recording/
+   danger?" — if not, it stays neutral (panelUp/line/textDim), never signal.
+
+   Radius hierarchy: 6px on small chips (camera thumb), 8-10px on buttons/
+   inputs, no more full-pill (999px) controls — that was the previous
+   file's most repeated tell.
+
+   Not yet touched: SpeakerSphere, ConversationBubble, IntegrityRing,
+   CodePanel, sphere.module.css are still the pre-existing sibling files.
+   Their internal visuals (sphere material, bubble styling, ring stroke)
+   weren't included in this pass since only InterviewPanel.jsx was
+   provided — if they still carry the old indigo/cyan accents internally,
+   there'll be a visible seam until they're brought into this same token
+   system in a follow-up pass.
+═══════════════════════════════════════════════════════════════════════════ */
